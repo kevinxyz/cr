@@ -1,0 +1,17 @@
+#!/bin/sh
+
+export CR=$0
+export CR_SUBJECT_HEADER="[Code review] "
+export CR_DEFAULT_CC="developers@__MY_DOMAIN__"
+export CR_MAX_PERL_COLS=89
+export CR_MAX_PYTHON_COLS=79
+export CR_MAX_JAVA_COLS=79
+export CR_MAX_OTHERS_COLS=1000
+export CR_ALLOW_TABS=0
+
+#export CR_SVN_REPOSITORY_URL='http://codesion.com/.../...'
+export CR_GIT_REPO_REGEX="git@github.com:(.+).git"
+export CR_GIT_HTTP_URL="https://github.com/%(repo)s/commit/%(hash)s"
+export CR_GIT_BASE_URL="https://github.com/%(repo)s"
+
+$CR.py "$@"
