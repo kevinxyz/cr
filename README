@@ -12,8 +12,9 @@ to fetch comments (in order to grep for LGTM).
 Installation:
 =============
 First make sure to add Google Code Review to your Google App domain
-(log in to http://www.google.com/a/__MY_DOMAIN__ then click on 
-Add More Services and add it)
+(log in to http://www.google.com/a/__MY_DOMAIN__ then go here:
+http://www.google.com/enterprise/marketplace/viewListing?productListingId=5143210+12982233047309328439
+and then click on Add it now).
 
 Afterwards, in files bin/cr and bin/upload.py, replace __MY_DOMAIAN__ 
 and other variables with your own Google App domain specific variables. 
