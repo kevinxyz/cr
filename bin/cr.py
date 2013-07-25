@@ -517,11 +517,11 @@ get around the problem by adding a bogus empty line to these files.""" %
                           mondrian_description,
                           force=False):
     message = mondrian_description + " " + approval_message
-    cmd = [SVN, "commit", "--changelist", cl, "--message", message]
+    cmd = [SVN, "commit", "--changelist", changelist_name, "--message", message]
     logging.debug("CMD: " + str(cmd))
     vcs_st, ret_code = RunShellWithReturnCode(cmd, print_output=True)
     if ret_code != 0:
-      ErrorExit("Unable to commit changelist '%s'..." % cl)
+      ErrorExit("Unable to commit changelist '%s'..." % changelist_name)
     m = re.search(r'Committed revision (\d+)', vcs_st)
     if not m:
       ErrorExit("Unable to find revision number in svn commit!")
@@ -561,7 +561,7 @@ get around the problem by adding a bogus empty line to these files.""" %
           changelist_to_filegroupinfo[changelist] = (
             FileGroupInfo(name=changelist,
                           type=FileGroupInfo.TYPE_FILES,
-                          files=file_info_list))
+                          fileinfo_list=file_info_list))
         changelist = m.group(1)
         file_info_list = []
         continue
@@ -575,7 +575,7 @@ get around the problem by adding a bogus empty line to these files.""" %
       changelist_to_filegroupinfo[changelist] = (
         FileGroupInfo(name=changelist,
                       type=FileGroupInfo.TYPE_FILES,
-                      files=file_info_list))
+                      fileinfo_list=file_info_list))
 
     return changelist_to_filegroupinfo
 
