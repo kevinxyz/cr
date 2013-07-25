@@ -1,4 +1,4 @@
-#!/usr/bin/python2.6
+#!python
 
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the FOO licence. The full text of the licence can be
