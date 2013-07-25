@@ -46,7 +46,7 @@ import sys
 import time
 import urllib, urllib2
 
-import import_dirs
+#import import_dirs
 
 # import a third party HTML/XML in-memory parser
 try:
@@ -581,7 +581,7 @@ get around the problem by adding a bogus empty line to these files.""" %
 
   def moveFilesToChangelist(self, file_list, changelist_name):
     """ Move a bunch of files to a changelist using svn native command """
-    if len(file_list) > 0 and options.changelist is None:
+    if len(file_list) > 0: #jkm and self.options.changelist is None:
       cmd = [SVN, "changelist", changelist_name]
       cmd.extend(file_list)
       print("Moving files [%s] into changelist '%s'..." %
