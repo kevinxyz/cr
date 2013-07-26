@@ -16,8 +16,7 @@ First make sure to add Google Code Review to your Google App domain
 http://www.google.com/enterprise/marketplace/viewListing?productListingId=5143210+12982233047309328439
 and then click on Add it now).
 
-Afterwards, in files bin/cr and bin/upload.py, replace __MY_DOMAIAN__ 
-and other variables with your own Google App domain specific variables. 
+Afterwards, in bin/cr change your CR_SERVER to your server.
 Now you can start using cr!
 
 Things to try:
@@ -31,5 +30,5 @@ cr mail -r mike
 cr finish
 
 
--KevinX (happy productive Xoogler)
-2012-07-14
+-Kevin X
+2013-07-26

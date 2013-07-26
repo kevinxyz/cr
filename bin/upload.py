@@ -81,7 +81,8 @@ AUTH_ACCOUNT_TYPE = "HOSTED"
 
 # URL of the default review server. As for AUTH_ACCOUNT_TYPE, this line could be
 # changed by the review server (see handler for upload.py).
-DEFAULT_REVIEW_SERVER = "code.__MY_DOMAIN__.com"
+DEFAULT_REVIEW_SERVER = os.environ.get('CR_SERVER',
+                                       "code.__MY_DOMAIN__.com")
 
 # Max size of patch or base file.
 MAX_UPLOAD_SIZE = 900 * 1024

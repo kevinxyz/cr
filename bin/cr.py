@@ -55,6 +55,7 @@ try:
     raise ImportError("cr.py needs BeautifulSoup version 3.2.0 or higher")
 except ImportError, err:
   print >> sys.stderr, err
+  print "Maybe run: sudo apt-get install python-beautifulsoup"
   sys.exit(1)
 
 try:
@@ -70,7 +71,7 @@ from upload import RunShellWithReturnCode
 SVN = "svn"
 GIT = "git"
 UPLOAD_CONTENT_TYPE = "application/x-www-form-urlencoded"
-SERVER = upload.DEFAULT_REVIEW_SERVER
+SERVER = os.environ.get('CR_SERVER', upload.DEFAULT_REVIEW_SERVER)
 SUBJECT_HEADER = os.environ.get('CR_SUBJECT_HEADER', "")
 SVN_REPOSITORY_URL = os.environ.get('CR_SVN_REPOSITORY_URL', None)
 GIT_REPO_REGEX = os.environ.get('CR_GIT_REPO_REGEX', "__invalid_regex__")
@@ -849,7 +850,8 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
 
     changelist_info = self.changelist_info
     if changelist and not changelist_info.isAChangelist(changelist):
-      ErrorExit("Changelist '%s' does not exist." % changelist)
+      ErrorExit("Changelist '%s' does not exist in %s" % (changelist,
+                                                          changelist_info))
 
     working_cl = changelist_info.getAllChangelistWithFiles()
     workingfile_to_changelist = {}

@@ -2,7 +2,8 @@
 
 export CR=$0
 export CR_SUBJECT_HEADER="[Code review] "
-export CR_DEFAULT_CC="developers@__MY_DOMAIN__"
+#export CR_DEFAULT_CC="developers@__MY_DOMAIN__"
+export CR_DEFAULT_CC="kevinx@open42.com"
 export CR_MAX_PERL_COLS=89
 export CR_MAX_PYTHON_COLS=79
 export CR_MAX_JAVA_COLS=79
@@ -14,4 +15,10 @@ export CR_GIT_REPO_REGEX="git@github.com:(.+).git"
 export CR_GIT_HTTP_URL="https://github.com/%(repo)s/commit/%(hash)s"
 export CR_GIT_BASE_URL="https://github.com/%(repo)s"
 
-$CR.py "$@"
+script_location=`readlink $0`
+if [ "$script_location" = "" ]; then
+  script_location=$0
+fi
+dirname=`dirname $script_location`
+basename=`basename $script_location`
+PYTHONPATH=$dirname python $dirname/$basename.py "$@"
