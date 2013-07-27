@@ -512,7 +512,7 @@ get around the problem by adding a bogus empty line to these files.""" %
         cmd = [SVN, "st"]
         if len(argv) > 0:
             cmd.extend(argv)
-        vcs_st, ret_code = RunShellWithReturnCode(cmd, print_output=True)
+        _vcs_st, _ret_code = RunShellWithReturnCode(cmd, print_output=True)
 
     def commitAndGetMessage(self,
                             changelist_name,
@@ -540,12 +540,14 @@ get around the problem by adding a bogus empty line to these files.""" %
         # TODO(kevinx): add removeChangelist for svn
         pass
 
-    def getFileGroupInfo(self, changelist=None, opt_files=[]):
+    def getFileGroupInfo(self, changelist=None, opt_files=None):
         """
         Return a list of changelist groups and FileInfo objects
         from 'svn st'. Note that the first group may not have
         associated changelist name (None).
         """
+        if opt_files is None:
+            opt_files = []
         if changelist:
             opt_files.extend(["--changelist", changelist])
         cmd = [SVN, "status"]
@@ -573,7 +575,8 @@ get around the problem by adding a bogus empty line to these files.""" %
             if line and len(line) > 8 and line[0] != " " and line[0] != "":
                 file_name = line[8:]
                 file_type = line[0]
-                file_info_list.append(FileInfo(file_name, file_type, changelist))
+                file_info_list.append(
+                    FileInfo(file_name, file_type, changelist))
 
         if len(file_info_list) > 0:
             changelist_to_filegroupinfo[changelist] = (
@@ -622,7 +625,8 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
             else:
                 extra_args = [self.options.revision] + extra_args
         env = os.environ.copy()
-        if 'GIT_EXTERNAL_DIFF' in env: del env['GIT_EXTERNAL_DIFF']
+        if 'GIT_EXTERNAL_DIFF' in env:
+            del env['GIT_EXTERNAL_DIFF']
         # Changed(open42): removed --cached to allow branches
         return RunShell([GIT, "diff", "--no-ext-diff", "--no-color",
                          "--full-index", "-M"]
@@ -669,9 +673,9 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
         if '--all' in argv:
             argv.remove('--all')
         else:
-            # Preserve diff with a local branch (for the case where you branched
-            # off from another local branch, and your "cr status" diff is against
-            # that local branch.
+            # Preserve diff with a local branch (for the case where you
+            # branched off from another local branch, and your "cr status"
+            # diff is against that local branch.
             preserve_branch = {}
             for remote_branch, local_branch in branch_to_changelist:
                 if local_branch == current_branch:
@@ -681,7 +685,7 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
                 if (branch == current_branch or
                         re.search('origin/(master|production)$', branch) or
                         re.search('origin/%s$' % branch, branch) or
-                            branch in preserve_branch):
+                        branch in preserve_branch):
                     continue
                 branches.remove(branch)
 
@@ -689,9 +693,11 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
         # and target branch
         branch_change_count = {}
 
-        def printBranchDescription(carrot='v', branch_change_count={},
+        def printBranchDescription(carrot='v', branch_change_count=None,
                                    sort=True):
             """ Print out branch keys for the user. """
+            if branch_change_count is None:
+                branch_change_count = {}
             branch_info = [
                 " %s%s [working]" % (carrot, '-' * (len(branches))),
                 "%s%s [staged]" % (carrot, '-' * (len(branches) + 1))]
@@ -727,13 +733,13 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
 
         workingfile_to_info = {}
         committed_files = []
-        for file in sorted(git_fileinfo.keys()):
+        for fname in sorted(git_fileinfo.keys()):
             is_different = False
             status = ''
             # staged and working files
             for branch in [GitVCS.STAGED, GitVCS.WORKING]:
-                if git_fileinfo[file].getBranchInfo(branch):
-                    status += git_fileinfo[file].getBranchInfo(branch)
+                if git_fileinfo[fname].getBranchInfo(branch):
+                    status += git_fileinfo[fname].getBranchInfo(branch)
                     is_different = True
                 else:
                     status += ' '
@@ -741,7 +747,7 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
             for i, branch in enumerate(sorted(branches), start=1):
                 if branch == current_branch:
                     status += '*'
-                elif git_fileinfo[file].getBranchInfo(branch):
+                elif git_fileinfo[fname].getBranchInfo(branch):
                     status += str(i)
                     is_different = True
                     incr_branch_change(branch)
@@ -750,25 +756,25 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
             if not is_different:
                 continue
             if status.startswith('    '):
-                committed_files.append('%s %s' % (status, file))
+                committed_files.append('%s %s' % (status, fname))
             else:
-                workingfile_to_info[file] = '%s %s' % (status, file)
+                workingfile_to_info[fname] = '%s %s' % (status, fname)
         if len(committed_files) > 0:
             print "\n".join(committed_files)
 
         # print files that are not in changelists
         working_files = changelist_info.getAllFiles()
-        for file, info in sorted(workingfile_to_info.items()):
-            if file not in working_files:
+        for fname, info in sorted(workingfile_to_info.items()):
+            if fname not in working_files:
                 print info
 
         # print files that are in changelists
         padding = ' ' * (len(branches) + 3)
         for changelist in changelist_info.getAllChangelistWithFiles():
             print "%s(Changelist '%s')" % (padding, changelist)
-            for file in changelist_info.getFilesFromChangelist(changelist):
+            for fname in changelist_info.getFilesFromChangelist(changelist):
                 print(workingfile_to_info.get(
-                    file, "ERROR: '%s' not modified" % file))
+                    fname, "ERROR: '%s' not modified" % fname))
 
         printBranchDescription(carrot='^',
                                branch_change_count=branch_change_count,
@@ -845,19 +851,20 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
         gitCommitLogList = self._getGitCommitLogList(rev_from=remote_branch,
                                                      rev_to="HEAD")
         if len(gitCommitLogList) > 0:
-            for hash, desc in gitCommitLogList:
-                _, url = self._getGitHttpUrlInfo(hash=hash,
+            for _hash, desc in gitCommitLogList:
+                _, url = self._getGitHttpUrlInfo(_hash=_hash,
                                                  branch=remote_branch)
-                mondrian_msgs.append(desc + " " + (url if url else hash))
+                mondrian_msgs.append(desc + " " + (url if url else _hash))
         return "\n".join(mondrian_msgs)
 
     def removeChangelist(self, changelist):
         self.changelist_info.removeChangelist(changelist)
         self.changelist_info.save()
 
-    def getFileGroupInfo(self, changelist=None, opt_files=[]):
+    def getFileGroupInfo(self, changelist=None, opt_files=None):
         """ Implemention of changelist on top of git """
-
+        if opt_files is None:
+            opt_files = []
         changelist_info = self.changelist_info
         if changelist and not changelist_info.isAChangelist(changelist):
             ErrorExit("Changelist '%s' does not exist in %s" %
@@ -875,12 +882,12 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
         changelist_to_filegroupinfo = {}
         current_branch, branches, git_fileinfo = self._getCurrentGitInfo()
         logging.debug("git_fileinfo:%s" % git_fileinfo)
-        for file, fileinfo in git_fileinfo.items():
-            status = (git_fileinfo[file].getBranchInfo(GitVCS.STAGED) or
-                      git_fileinfo[file].getBranchInfo(GitVCS.WORKING))
+        for fname, fileinfo in git_fileinfo.items():
+            status = (git_fileinfo[fname].getBranchInfo(GitVCS.STAGED) or
+                      git_fileinfo[fname].getBranchInfo(GitVCS.WORKING))
             if status:
                 # status is working or staged file
-                cl = workingfile_to_changelist.get(file, None)
+                cl = workingfile_to_changelist.get(fname, None)
                 if cl not in changelist_to_filegroupinfo:
                     changelist_to_filegroupinfo[cl] = (
                         FileGroupInfo(name=cl,
@@ -917,9 +924,9 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
             self.changelist_info.save()
         else:
             error_lines = []
-            for file in set(file_list) - set(valid_files):
+            for fname in set(file_list) - set(valid_files):
                 error_lines.append("Error in adding to changelist: '%s' needs "
-                                   "to be a staged or working file " % file)
+                                   "to be a staged or working file " % fname)
             if len(error_lines) > 0:
                 ErrorExit("\n".join(error_lines))
 
@@ -963,6 +970,7 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
         return self.changelist_info.getChangelistFromBranch(remote_branch,
                                                             local_branch)
     # git-only functions:
+
     def parseGitChangelistOptions(self, args):
         """
         Parse the different changelist options:
@@ -1013,9 +1021,9 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
                     return
 
             self.moveFilesToChangelist(files, changelist)
-            for file in files:
+            for fname in files:
                 print("Path '%s' is now a member of changelist '%s'." %
-                      (file, changelist))
+                      (fname, changelist))
 
     def parseGitBranchOptions(self, args):
         """
@@ -1100,30 +1108,31 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
             for branch in branches:
                 cmd = [GIT, "diff", "--name-only", "--no-color",
                        branch, current_branch]
-                for file in RunShell(cmd, silent_ok=True).splitlines():
-                    if file not in git_fileinfo:
-                        git_fileinfo[file] = (
-                            FileInfo(file, type=None, changelist=None))
-                    git_fileinfo[file].setBranchInfo(branch, '*')
+                for fname in RunShell(cmd, silent_ok=True).splitlines():
+                    if fname not in git_fileinfo:
+                        git_fileinfo[fname] = (
+                            FileInfo(fname, type=None, changelist=None))
+                    git_fileinfo[fname].setBranchInfo(branch, '*')
 
         cmd = [GIT, "status", "--porcelain"]
         for line in RunShell(cmd, silent_ok=True).splitlines():
             m = re.match('^(.)(.) (.+)', line)
             if not m:
-                ErrorExit("Unable to parse 'status --porcelain' line: %s" % line)
-            stage, working, file = m.group(1, 2, 3)
-            if file not in git_fileinfo:
+                ErrorExit("Unable to parse 'status --porcelain' line: %s" %
+                          line)
+            stage, working, fname = m.group(1, 2, 3)
+            if fname not in git_fileinfo:
                 filetype = '?' if (stage != ' ' or working != ' ') else None
-                git_fileinfo[file] = (
-                    FileInfo(file, type=filetype, changelist=None))
+                git_fileinfo[fname] = (
+                    FileInfo(fname, type=filetype, changelist=None))
             if stage != ' ':
-                git_fileinfo[file].setBranchInfo(GitVCS.STAGED, stage)
+                git_fileinfo[fname].setBranchInfo(GitVCS.STAGED, stage)
             if working != ' ':
-                git_fileinfo[file].setBranchInfo(GitVCS.WORKING, working)
+                git_fileinfo[fname].setBranchInfo(GitVCS.WORKING, working)
 
         return current_branch, branches, git_fileinfo
 
-    def _getGitHttpUrlInfo(self, hash=None, branch=""):
+    def _getGitHttpUrlInfo(self, _hash=None, branch=""):
         """
         Return base URL and the hashed URL (for the current path).
         The base URL is used for display purpose, so that the reviewer
@@ -1140,14 +1149,14 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
             return None, None
         repo = m.group(1)
 
-        if not hash:
+        if not _hash:
             cmd = [GIT, 'log', '-1', '--pretty=%H']
-            hash, ret_code = RunShellWithReturnCode(cmd, print_output=False)
+            _hash, ret_code = RunShellWithReturnCode(cmd, print_output=False)
             if ret_code != 0:
                 ErrorExit("Unable to execute '%s'" % cmd)
 
-        vars = {'repo': repo, 'hash': hash.strip()}
-        git_base_url = GIT_BASE_URL % vars
+        _vars = {'repo': repo, 'hash': _hash.strip()}
+        git_base_url = GIT_BASE_URL % _vars
 
         if branch and branch.startswith('remotes/origin'):
             branch = re.sub('^remotes/origin', '', branch)
@@ -1155,7 +1164,7 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
             #               Make it generic
             git_base_url += "/tree" + branch
 
-        return git_base_url, GIT_HTTP_URL % vars
+        return git_base_url, GIT_HTTP_URL % _vars
 
     def _getGitCommitLogList(self, rev_from=None, rev_to=None):
         """
@@ -1173,7 +1182,7 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
         git_status, ret_code = RunShellWithReturnCode(cmd, print_output=False)
         if ret_code != 0:
             ErrorExit("Unable to execute '%s' to get branch status" % cmd)
-        branch_ahead = 1
+
         commit_match = re.search('Your branch is ahead .+ by (\d+) commit',
                                  git_status)
         if commit_match:
@@ -1203,9 +1212,9 @@ def ParseUserArguments(vcs, opt_revision, opt_changelist, opt_files):
 
     if opt_revision:
         return (opt_changelist if opt_changelist else "issue",
-                [], # fileinfo_list,
-                None, # remote_branch,
-                None) # local_branch
+                [],  # fileinfo_list,
+                None,  # remote_branch,
+                None)  # local_branch
 
     changelist_to_filegroupinfo = (
         vcs.getFileGroupInfo(changelist=opt_changelist))
@@ -1215,8 +1224,7 @@ def ParseUserArguments(vcs, opt_revision, opt_changelist, opt_files):
     # The user will either want to commit files (defined by fileinfo_list),
     # or upload to branch (defined by remote_branch & local_branch).
     cl = None
-    fileinfo_list = None
-    remote_branch = local_branch = None
+
     if opt_changelist:
         # user defined changelist, return the right group
         cl = opt_changelist
@@ -1274,7 +1282,8 @@ def ParseUserArguments(vcs, opt_revision, opt_changelist, opt_files):
             filegroup_info = (
                 FileGroupInfo(name=cl,
                               type=FileGroupInfo.TYPE_FILES,
-                              fileinfo_list=[FileInfo(fn, type='*', changelist=cl)
+                              fileinfo_list=[FileInfo(fn, type='*',
+                                                      changelist=cl)
                                              for fn in opt_files]))
 
     return (cl,
@@ -1306,13 +1315,15 @@ def fetchContentFromUrl(rpc_server, url):
                     re.match(r'No issue exists', err_html, re.IGNORECASE)):
                 ErrorExit("Error in http://%s%s, maybe it is closed?\n%s" %
                           (SERVER, url, err_html))
-            print "Error %d in 'http://%s%s', retrying..." % (e.code, SERVER, url)
+            print("Error %d in 'http://%s%s', retrying..." %
+                  (e.code, SERVER, url))
             time.sleep(1)
             tries -= 1
         except urllib2.URLError, e:
             ErrorExit("Unable to find server '%s' (%s)" % (SERVER, str(e)))
         except Exception, e:
-            ErrorExit("Fatal error in http://%s%s:\n%s" % (SERVER, url, str(e)))
+            ErrorExit("Fatal error in http://%s%s:\n%s" %
+                      (SERVER, url, str(e)))
     if tries == 0:
         ErrorExit("Failed fetching from 'http://%s%s'" % (SERVER, url))
 
@@ -1408,6 +1419,7 @@ def printCrHelp(prog, vcs_cmd):
 
     printChangelistHelp(prog, vcs_cmd)
 
+
 def printChangelistHelp(prog, vcs_cmd):
     help_params = {'prog': prog, 'cl': 'issue6172002',
                    'files': "file1.py file2.pl ..."}
@@ -1502,7 +1514,8 @@ def executeUploadPy(vcs,
                 last_email_file.close()
                 upload_argv.extend(["-e", last_email])
             except IOError, e:
-                ErrorExit("Error reading ~/.last_codereview_email_address")
+                ErrorExit("Error reading ~/.last_codereview_email_address %s" %
+                          e)
 
     if options.send_mail:
         upload_argv.extend(["--send_mail"])
@@ -1545,7 +1558,8 @@ def executeIssueNumberAndUpload(vcs, prog, argv,
 
     # either return fileinfo_list, or (remote_branch & local_branch)
     cl, fileinfo_list, remote_branch, local_branch = (
-        ParseUserArguments(vcs, options.revision, options.changelist, user_files))
+        ParseUserArguments(
+            vcs, options.revision, options.changelist, user_files))
 
     # If using Git but no message provided, then check for already
     # committed messages (thus passing --message is not necessary).
@@ -1562,7 +1576,7 @@ def executeIssueNumberAndUpload(vcs, prog, argv,
                                                     rev_to=rev_to)
         if len(gitCommitLogList) > 0:
             options.message = " ".join(
-                [desc for hash, desc in gitCommitLogList])
+                [desc for _hash, desc in gitCommitLogList])
 
     if not options.message:
         CrOptionParser.parser.error("Please specify --message [short: -m]")
