@@ -72,7 +72,7 @@ except ImportError:
 #  1: Status messages.
 #  2: Info logs.
 #  3: Debug logs.
-verbosity = 1
+verbosity = 0
 
 # The account type used for authentication.
 # This line could be changed by the review server (see handler for
@@ -2252,7 +2252,8 @@ def RealMain(argv, data=None):
 
 def main():
   try:
-    logging.basicConfig(format=("%(asctime).19s %(levelname)s %(filename)s:"
+    logging.basicConfig(#level=logging.ERROR,
+        format=("%(asctime).19s %(levelname)s %(filename)s:"
                                 "%(lineno)s %(message)s "))
     os.environ['LC_ALL'] = 'C'
     RealMain(sys.argv)

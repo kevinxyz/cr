@@ -46,8 +46,6 @@ import sys
 import time
 import urllib, urllib2
 
-#import import_dirs
-
 # import a third party HTML/XML in-memory parser
 try:
     import BeautifulSoup
@@ -75,6 +73,22 @@ SVN_REPOSITORY_URL = os.environ.get('CR_SVN_REPOSITORY_URL', None)
 GIT_REPO_REGEX = os.environ.get('CR_GIT_REPO_REGEX', "__invalid_regex__")
 GIT_HTTP_URL = os.environ.get('CR_GIT_HTTP_URL', "")
 GIT_BASE_URL = os.environ.get('CR_GIT_BASE_URL', "")
+logging.basicConfig(level=(logging.DEBUG if os.environ.get('DEBUG', None)
+                           else logging.ERROR),
+                    format=('%(asctime)s:%(levelname)s:'
+                            '%(lineno)s: %(message)s'))
+logger = logging.getLogger(__name__)
+
+
+def RunShellWithLineCommand(cmds):
+    if isinstance(cmds, basestring):
+        cmds = [cmds]
+    for cmd in cmds:
+        print cmd
+        cmds = cmd.split(' ')
+        output, ret_code = RunShellWithReturnCode(cmds, print_output=True)
+        if ret_code != 0:
+            ErrorExit("Unable to execute '%s': %s" % (cmd, output))
 
 
 class CrOptionParser(object):
@@ -105,9 +119,9 @@ class CrOptionParser(object):
     option_group.add_option("-R", "--rev", "--revision",
                             action="store", dest="revision",
                             metavar="REV", default=None,
-                            help="Base revision/branch/tree to diff against. "
-                                 "Use rev1:rev2 range to review already "
-                                 "committed change.")
+                            help="Base SVN revision/branch/tree to diff "
+                                 "against. Use rev1:rev2 range to review "
+                                 "already committed change.")
     option_group.add_option("-r", "--reviewers", action="store",
                             dest="reviewers",
                             metavar="REVIEWERS", default=None,
@@ -183,157 +197,6 @@ class FileGroupInfo(object):
             meta = getBranchPrintout(self.remote_branch, self.local_branch)
         return ("{filegroupname:%s, type:%s, info:%s}" %
                 (self.name, self.type, meta))
-
-
-class ChangelistInfo(object):
-    """
-    This is an independent changelist object that mimics svn.
-    The information is saved in the .git/changelist directory.
-    The object encapsulated in this class contains mappings for:
-    1) issue-to-files (artificial changelist)
-    2) issue-to-branch (git)
-    3) branches to hide from being displayed
-    """
-    BRANCHES = '__branches__'
-    STAGED_AND_WORKING = '__staged_and_working__'
-    HIDDEN_BRANCHES = '__hidden_branches__'
-
-    def __init__(self, gitdir):
-        self.gitdir = gitdir
-        self.changelist_to_branch = {}
-        self.changelist_to_files = {}
-        self.hidden_branches = []
-        self.config_file = gitdir + "/changelist"
-        self.load(self.config_file)
-
-    def load(self, file=None):
-        if not file:
-            file = self.config_file
-        if os.path.exists(file):
-            fd = open(file, 'r')
-            changelist_info = json.loads(fd.read())
-            self.changelist_to_branch = changelist_info.get(
-                ChangelistInfo.BRANCHES, {})
-            self.changelist_to_files = changelist_info.get(
-                ChangelistInfo.STAGED_AND_WORKING, {})
-            self.hidden_branches = changelist_info.get(
-                ChangelistInfo.HIDDEN_BRANCHES, [])
-            fd.close()
-
-    def save(self):
-        """
-        Load changelist information from .git/changelist. The format
-        looks like this:
-        {
-                ChangelistInfo.BRANCHES: {
-                        "issue6198003": ["remotes/origin/master", "master"], 
-                        "issue6199003-zzz": ["master", "my_test"]
-                }, 
-                ChangelistInfo.STAGED_AND_WORKING: {
-                        "issue6197001": ['bin/cr.py', 'lib/python/my_code.py']
-                }
-                ChangelistInfo.HIDDEN_BRANCHES: [
-                        "remotes/origin/my_perf_test_junk"
-                ]
-        }
-        """
-        fd = open(self.config_file, 'w')
-        cl_obj = {
-            ChangelistInfo.BRANCHES: self.changelist_to_branch,
-            ChangelistInfo.STAGED_AND_WORKING: self.changelist_to_files,
-            ChangelistInfo.HIDDEN_BRANCHES: self.hidden_branches
-        }
-        fd.write(json.dumps(cl_obj, sort_keys=True, indent=4))
-        fd.close()
-
-    def isAChangelist(self, changelist):
-        return (changelist in self.changelist_to_branch or
-                changelist in self.changelist_to_files)
-
-    # changelist_to_branch utilities
-
-    def moveBranchToChangelist(self, remote_branch, local_branch, changelist):
-        # clean out existing changelist
-        self.removeChangelist(changelist)
-        self.removeBranchFromChangelist(remote_branch, local_branch)
-        self.changelist_to_branch[changelist] = [remote_branch, local_branch]
-
-    def removeBranchFromChangelist(self, remote_branch, local_branch):
-        for changelist, branch in self.changelist_to_branch.items():
-            if branch[0] == remote_branch and branch[1] == local_branch:
-                self.changelist_to_branch.pop(changelist)
-
-    def getBranchInfoFromChangelist(self, changelist):
-        return self.changelist_to_branch.get(changelist, (None, None))
-
-    def getAllChangelistWithBranches(self):
-        return self.changelist_to_branch.keys()
-
-    def getChangelistFromBranch(self, remote_branch, local_branch):
-        for changelist, branch in self.changelist_to_branch.items():
-            if branch[0] == remote_branch and branch[1] == local_branch:
-                return changelist
-        return None
-
-    def getAllBranchToChangelistInfo(self):
-        return dict(((branch_info[0], branch_info[1]), cl)
-                    for cl, branch_info in self.changelist_to_branch.items())
-
-    # changelist_to_files utilities
-
-    def addFilesToChangelist(self, file_or_filelist, changelist):
-        if type(file_or_filelist) != list:
-            files = [file_or_filelist]
-        else:
-            files = file_or_filelist
-        self.removeFiles(files)
-        if changelist not in self.changelist_to_files:
-            self.changelist_to_files[changelist] = []
-        self.changelist_to_files[changelist].extend(files)
-
-    def getAllFiles(self):
-        files_list = self.changelist_to_files.values()
-        if len(files_list) > 0:
-            return reduce(lambda x, y: x + y, self.changelist_to_files.values())
-        return []
-
-    def getFilesFromChangelist(self, changelist):
-        return self.changelist_to_files.get(changelist, [])
-
-    def getAllChangelistWithFiles(self):
-        return self.changelist_to_files.keys()
-
-    def removeFiles(self, file_or_filelist):
-        if type(file_or_filelist) != list:
-            remove_files = [file_or_filelist]
-        else:
-            remove_files = file_or_filelist
-        for changelist, files in self.changelist_to_files.items():
-            new_file_list = sorted(list(set(files) - set(remove_files)))
-            self.changelist_to_files[changelist] = new_file_list
-            if len(new_file_list) == 0:
-                self.changelist_to_files.pop(changelist)
-
-    # for all changelists
-
-    def removeChangelist(self, changelist):
-        if changelist in self.changelist_to_branch:
-            self.changelist_to_branch.pop(changelist)
-        if changelist in self.changelist_to_files:
-            self.changelist_to_files.pop(changelist)
-
-    # functions to hide/show branches in status
-
-    def hideBranchFromStatus(self, branch):
-        if branch not in self.hidden_branches:
-            self.hidden_branches.append(branch)
-
-    def showBranchInStatus(self, branch):
-        if branch in self.hidden_branches:
-            self.hidden_branches.remove(branch)
-
-    def getAllHiddenBranches(self):
-        return self.hidden_branches
 
 
 class CrBaseVCS(object):
@@ -452,27 +315,14 @@ class CrBaseVCS(object):
     def removeChangelist(self, changelist):
         raise NotImplementedError("Please override removeChangelist")
 
-    # File changelist
     def getFileGroupInfo(self, changelist=None, opt_files=[]):
+        """
+        Return an assocative array of changelist -> FileGroupInfo
+        """
         raise NotImplementedError("Please override getFileGroupInfo")
 
     def moveFilesToChangelist(self, file_list, changelist_name):
         raise NotImplementedError("Please override moveFilesToChangelist")
-
-    # Branch changelists (Git specific)
-
-    def moveBranchToChangelist(self,
-                               remote_branch, local_branch, changelist_name):
-        raise NotImplementedError("Please override moveBranchToChangelist")
-
-    def removeBranchFromChangelist(self, remote_branch, local_branch):
-        raise NotImplementedError("Please override removeBranchFromChangelist")
-
-    def getBranchInfoFromRemoteBranchName(self, remote_branch):
-        return None, None
-
-    def getChangelistFromBranch(self, remote_branch, local_branch):
-        raise NotImplementedError("Please override getChangelistFromBranch")
 
 
 class SubversionVCS(CrBaseVCS, upload.SubversionVCS):
@@ -522,7 +372,7 @@ get around the problem by adding a bogus empty line to these files.""" %
         message = mondrian_description + " " + approval_message
         cmd = [SVN, "commit", "--changelist", changelist_name,
                "--message", message]
-        logging.debug("CMD: " + str(cmd))
+        logger.debug("CMD: " + str(cmd))
         vcs_st, ret_code = RunShellWithReturnCode(cmd, print_output=True)
         if ret_code != 0:
             ErrorExit("Unable to commit changelist '%s'..." % changelist_name)
@@ -612,13 +462,12 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
 
     def __init__(self, options):
         pwd, git_dir = self._getGitDir()
-        self.changelist_info = ChangelistInfo(git_dir)
         self.pwd = pwd
         super(GitVCS, self).__init__(options)
 
     def _generateDiff(self, extra_args):
         """ This is from upload.py except that '--cached' is taken out """
-        extra_args = extra_args[:]
+        #extra_args = extra_args[:]
         if self.options.revision:
             if ":" in self.options.revision:
                 extra_args = self.options.revision.split(":", 1) + extra_args
@@ -637,23 +486,12 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
         Override the default git GenerateDiff and add HEAD to ensure that
         both staging and working files are included.
         """
-        logging.debug("Generating diff for %s" % args)
-
-        if options and options.difffile:
-            print "Debug: using your own diff file:%s" % options.difffile
-            return open(options.difffile).read()
-
-        if options.revision:
-            return self._generateDiff([])
-
-        if len(args) == 2:
-            current_branch, branches, _ = self._getCurrentGitInfo()
-            if args[0] in branches and args[1] == current_branch:
-                # the arg is a branch name, diff the branch
-                return self._generateDiff(args)
+        logger.debug("Generating diff for %s" % args)
 
         # get a diff of staging and working files
-        return self._generateDiff(['HEAD', '--'] + args)
+        full_branch, _, _, remote_branch, _, _ = self._getCurrentGitInfo()
+        return self._generateDiff([remote_branch, full_branch, '--'])
+        #return self._generateDiff(['HEAD', '--'] + args)
 
     def getBaseUrl(self, branch=None):
         base_url, _ = self._getGitHttpUrlInfo(branch=branch)
@@ -661,406 +499,131 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
 
     def executeStatus(self, prog, argv):
         """ Execute status """
-        changelist_info = self.changelist_info
-        branch_to_changelist = changelist_info.getAllBranchToChangelistInfo()
-        hidden_branches = changelist_info.getAllHiddenBranches()
-        current_branch, branches, git_fileinfo = self._getCurrentGitInfo()
-        for hidden_branch in hidden_branches:
-            if hidden_branch in branches:
-                branches.remove(hidden_branch)
-
-        # user list options
-        if '--all' in argv:
-            argv.remove('--all')
-        else:
-            # Preserve diff with a local branch (for the case where you
-            # branched off from another local branch, and your "cr status"
-            # diff is against that local branch.
-            preserve_branch = {}
-            for remote_branch, local_branch in branch_to_changelist:
-                if local_branch == current_branch:
-                    preserve_branch[remote_branch] = True
-                # now remove unwanted branches to make the display cleaner
-            for branch in list(branches):
-                if (branch == current_branch or
-                        re.search('origin/(master|production)$', branch) or
-                        re.search('origin/%s$' % branch, branch) or
-                        branch in preserve_branch):
-                    continue
-                branches.remove(branch)
-
-        # count the number of files that are different between current branch
-        # and target branch
-        branch_change_count = {}
-
-        def printBranchDescription(carrot='v', branch_change_count=None,
-                                   sort=True):
-            """ Print out branch keys for the user. """
-            if branch_change_count is None:
-                branch_change_count = {}
-            branch_info = [
-                " %s%s [working]" % (carrot, '-' * (len(branches))),
-                "%s%s [staged]" % (carrot, '-' * (len(branches) + 1))]
-            i = 1 if sort else len(branches)
-            for branch in sorted(branches, reverse=not sort):
-                is_curr_line = '* ' if branch == current_branch else ''
-                meta_info = []
-                if branch in branch_change_count:
-                    meta_info.append("%d changed files" %
-                                     branch_change_count[branch])
-                cl_line = branch_to_changelist.get((branch, current_branch),
-                                                   None)
-                if cl_line:
-                    meta_info.append("Changelist '%s'" % cl_line)
-                branch_info.append("%s%s%s %d %s%s%s" %
-                                   (' ' * (2 + i - 1),
-                                    carrot,
-                                    '-' * (len(branches) - i),
-                                    i,
-                                    branch,
-                                    (" (%s)" % ", ".join(meta_info)) \
-                                        if meta_info else "",
-                                    is_curr_line))
-                i += 1 if sort else -1
-            print "\n".join(sorted(branch_info, reverse=sort))
-
-        def incr_branch_change(branch):
-            """ If branch has a changed file, increment the count """
-            if branch in branch_change_count:
-                branch_change_count[branch] += 1
-            else:
-                branch_change_count[branch] = 1
-
-        workingfile_to_info = {}
-        committed_files = []
-        for fname in sorted(git_fileinfo.keys()):
-            is_different = False
-            status = ''
-            # staged and working files
-            for branch in [GitVCS.STAGED, GitVCS.WORKING]:
-                if git_fileinfo[fname].getBranchInfo(branch):
-                    status += git_fileinfo[fname].getBranchInfo(branch)
-                    is_different = True
-                else:
-                    status += ' '
-                # branches
-            for i, branch in enumerate(sorted(branches), start=1):
-                if branch == current_branch:
-                    status += '*'
-                elif git_fileinfo[fname].getBranchInfo(branch):
-                    status += str(i)
-                    is_different = True
-                    incr_branch_change(branch)
-                else:
-                    status += ' '
-            if not is_different:
-                continue
-            if status.startswith('    '):
-                committed_files.append('%s %s' % (status, fname))
-            else:
-                workingfile_to_info[fname] = '%s %s' % (status, fname)
-        if len(committed_files) > 0:
-            print "\n".join(committed_files)
-
-        # print files that are not in changelists
-        working_files = changelist_info.getAllFiles()
-        for fname, info in sorted(workingfile_to_info.items()):
-            if fname not in working_files:
-                print info
-
-        # print files that are in changelists
-        padding = ' ' * (len(branches) + 3)
-        for changelist in changelist_info.getAllChangelistWithFiles():
-            print "%s(Changelist '%s')" % (padding, changelist)
-            for fname in changelist_info.getFilesFromChangelist(changelist):
-                print(workingfile_to_info.get(
-                    fname, "ERROR: '%s' not modified" % fname))
-
-        printBranchDescription(carrot='^',
-                               branch_change_count=branch_change_count,
-                               sort=True)
-
-        if len(hidden_branches) > 0:
-            print("Hidden from status:%s" %
-                  [br.encode('utf-8') for br in hidden_branches])
+        cmd = [GIT, 'status']
+        cmd.extend(argv)
+        logger.debug("%% %s" % cmd)
+        _vcs_st, _ret_code = RunShellWithReturnCode(cmd, print_output=True)
 
     def commitAndGetMessage(self,
                             changelist,
                             approval_message,
                             mondrian_description,
                             force=False):
-        """ Commit a 'changelist' in GIT. Need to load the changelist DB. """
-        changelist_to_filegroupinfo = (
-            self.getFileGroupInfo(changelist=changelist))
-        filegroupinfo = changelist_to_filegroupinfo.get(changelist, None)
-        files = []
-        remote_branch = local_branch = None
-        if filegroupinfo:
-            if filegroupinfo.type == FileGroupInfo.TYPE_FILES:
-                fileinfo_list = filegroupinfo.fileinfo_list
-                files = [f.name for f in fileinfo_list if f.type != '?']
-                if len(files) == 0:
-                    ErrorExit("Unable to find any file under changelist '%s'" %
-                              changelist)
-            elif filegroupinfo.type == FileGroupInfo.TYPE_BRANCH:
-                remote_branch = filegroupinfo.remote_branch
-                local_branch = filegroupinfo.local_branch
-            else:
-                ErrorExit("Changelist '%s' has an invalid type '%s'" %
-                          (changelist, filegroupinfo.type))
+        """ Commit from HEAD to origin/master """
+        full_branch, issue, current_branch, remote_branch, branches, _ = (
+            self._getCurrentGitInfo())
+
+        commit_log = self._getGitCommitLogList(rev_from=remote_branch,
+                                               rev_to=full_branch)
+        if len(commit_log) == 0:
+            ErrorExit("The commit log from %s..%s is empty!" %
+                      (remote_branch, 'HEAD'))
+
+        # Amend the last git message to contain approver name.
+        _git_subject = commit_log[0][1].decode('utf-8')
+        _git_subject = re.sub(u'^[\u2713|\u2717]+', '', _git_subject)
+        _git_subject = (u'\u2713' if not force else u'\u2717') + _git_subject
+        git_body = commit_log[0][2]
+        git_body = re.sub("\s*\(Code-reviewer.+\)\s*", '', git_body)
+        git_body = re.sub(r'[\n\s\r]+$', '', git_body)
+        git_body = approval_message + '\n\n' + git_body
+
+        new_msg = _git_subject + '\n\n' + git_body
+        cmd = [GIT, "commit", "--amend", "-m", new_msg]
+        mondrian_commit_msg, ret_code = (
+            RunShellWithReturnCode(cmd, print_output=False))
+        if ret_code != 0:
+            ErrorExit("Unable to execute '%s' to amend message..." % cmd)
+
+        remote_name = remote_branch.split("/")[-1]
+        cmd_args = {'prog': GIT,
+                    'current_branch': full_branch,
+                    'remote_branch': remote_branch,
+                    'remote_name': remote_name}
+
+        if current_branch == 'master':
+            print("You are on master. "
+                  "It's safer/cleaner if you branch next time.")
         else:
-            ErrorExit("Changelist '%s' is not found in file group info." %
-                      changelist)
+            pass
+            #"%(prog)s merge --no-ff --log %(current_branch)s"])
 
-        if filegroupinfo.type == FileGroupInfo.TYPE_FILES:
-            # Commit only if the files exist (e.g. they're either staging or
-            # working files).
-            cmd = [GIT, "commit", "--message", mondrian_description] + files
-            logging.debug("CMD: " + str(cmd))
-            mondrian_commit_msg, ret_code = (
-                RunShellWithReturnCode(cmd, print_output=True))
-            if ret_code != 0:
-                ErrorExit("Unable to commit changelist '%s'..." % changelist)
-        elif filegroupinfo.type == FileGroupInfo.TYPE_BRANCH:
-            # Amend the git message to contain approver name.
-            cmd = [GIT, "log", "-1", "--pretty=%s"]
-            logging.debug("CMD: " + str(cmd))
-            log_msg, ret_code = RunShellWithReturnCode(cmd, print_output=False)
-            if ret_code != 0:
-                ErrorExit("Unable to execute '%s' to get log description..." %
-                          cmd)
-            log_msg = re.sub("[\n\r]+", " ", log_msg.rstrip())
-            log_msg = re.sub("\s*\(Code-reviewer.+\)\s*", "", log_msg)
-            new_msg = log_msg + " " + approval_message
-            cmd = [GIT, "commit", "--amend", "-m", new_msg]
-            mondrian_commit_msg, ret_code = (
-                RunShellWithReturnCode(cmd, print_output=False))
-            if ret_code != 0:
-                ErrorExit("Unable to execute '%s' to amend message..." % cmd)
+        RunShellWithLineCommand(
+            ["%(prog)s fetch" % cmd_args,
+             "%(prog)s rebase %(remote_branch)s" % cmd_args])
 
-        current_branch, branches, _ = self._getCurrentGitInfo()
-        if remote_branch and local_branch:
-            printGitFinishHelp(current_branch, remote_branch)
+        # refetch git commit log because the hash IDs may have changed
+        commit_log = self._getGitCommitLogList(rev_from=remote_branch,
+                                               rev_to=full_branch)
+        if len(commit_log) == 0:
+            ErrorExit('Commit log from %s..%s is empty!' %
+                      (full_branch, remote_branch))
+
+        # pull from remotes/origin/master, and then merge (may change hash IDs)
+        if current_branch == 'master':
+            RunShellWithLineCommand(
+                ['%(prog)s push origin %(remote_name)s' % cmd_args])
         else:
-            print("Committed to '%s'. Feel free to merge, push, etc..." %
-                  current_branch)
+            RunShellWithLineCommand(
+                ['%(prog)s push origin'
+                 ' %(current_branch)s:%(remote_name)s' % cmd_args])
+            print """Suggested commands to sync and clean up branch manually:
+%(prog)s checkout master; %(prog)s rebase origin/master;
+%(prog)s branch -d %(current_branch)s""" % cmd_args
 
-        # Retrieve committed messages from git (description and hash), and then
+        # Retrieve committed messages from git (git_hash & desc), and then
         # generate the final message to be posted on Mondrian.
         mondrian_msgs = []
-        gitCommitLogList = self._getGitCommitLogList(rev_from=remote_branch,
-                                                     rev_to="HEAD")
-        if len(gitCommitLogList) > 0:
-            for _hash, desc in gitCommitLogList:
-                _, url = self._getGitHttpUrlInfo(_hash=_hash,
-                                                 branch=remote_branch)
-                mondrian_msgs.append(desc + " " + (url if url else _hash))
+        for git_hash, desc, git_body in commit_log:
+            _, url = self._getGitHttpUrlInfo(githash=git_hash,
+                                             branch=remote_branch)
+            mondrian_msgs.append((url if url else git_hash) + '\n' +
+                                 desc + git_body)
         return "\n".join(mondrian_msgs)
 
     def removeChangelist(self, changelist):
-        self.changelist_info.removeChangelist(changelist)
-        self.changelist_info.save()
+        print "You may optionally remove your changelist"
 
     def getFileGroupInfo(self, changelist=None, opt_files=None):
         """ Implemention of changelist on top of git """
+        # TODO(kevinx): deprecate this if possible!
         if opt_files is None:
             opt_files = []
-        changelist_info = self.changelist_info
-        if changelist and not changelist_info.isAChangelist(changelist):
-            ErrorExit("Changelist '%s' does not exist in %s" %
-                      (changelist, changelist_info))
-
-        working_cl = changelist_info.getAllChangelistWithFiles()
-        workingfile_to_changelist = {}
-        for cl in working_cl:
-            for file_name in changelist_info.getFilesFromChangelist(cl):
-                workingfile_to_changelist[file_name] = cl
-        logging.debug("working cl:%s" % working_cl)
-        logging.debug("workingfile_to_cl:%s" % workingfile_to_changelist)
-
         # populate working-and-staged files in the changelist
         changelist_to_filegroupinfo = {}
-        current_branch, branches, git_fileinfo = self._getCurrentGitInfo()
-        logging.debug("git_fileinfo:%s" % git_fileinfo)
-        for fname, fileinfo in git_fileinfo.items():
-            status = (git_fileinfo[fname].getBranchInfo(GitVCS.STAGED) or
-                      git_fileinfo[fname].getBranchInfo(GitVCS.WORKING))
-            if status:
-                # status is working or staged file
-                cl = workingfile_to_changelist.get(fname, None)
-                if cl not in changelist_to_filegroupinfo:
-                    changelist_to_filegroupinfo[cl] = (
-                        FileGroupInfo(name=cl,
-                                      type=FileGroupInfo.TYPE_FILES,
-                                      fileinfo_list=[]))
-                fileinfo.setStatus(status)
-                fileinfo.setChangelist(cl)
-                changelist_to_filegroupinfo[cl].appendFileInfo(fileinfo)
+        (full_branch, issue, current_branch, remote_branch,
+         branches, git_fileinfo) = self._getCurrentGitInfo()
+        logger.debug("git_fileinfo:%s" % git_fileinfo)
 
-        branch_cl = changelist_info.getAllChangelistWithBranches()
-        logging.debug("branch cl list:%s" % branch_cl)
-        for cl in branch_cl:
-            remote_branch, local_branch = (
-                changelist_info.getBranchInfoFromChangelist(cl))
-            if local_branch != current_branch:
-                continue
-            changelist_to_filegroupinfo[cl] = (
-                FileGroupInfo(name=cl,
-                              type=FileGroupInfo.TYPE_BRANCH,
-                              remote_branch=remote_branch,
-                              local_branch=local_branch))
+        cmd = [GIT, "diff", "--name-only", "--no-color",
+               remote_branch, full_branch]
+        for fname in RunShell(cmd, silent_ok=True).splitlines():
+            if fname not in git_fileinfo:
+                git_fileinfo[fname] = (
+                    FileInfo(fname, type=None, changelist=full_branch))
+                git_fileinfo[fname].setBranchInfo(remote_branch, '*')
+
+        changelist_to_filegroupinfo[full_branch] = (
+            FileGroupInfo(name=full_branch,
+                          type=FileGroupInfo.TYPE_BRANCH,
+                          remote_branch=remote_branch,
+                          local_branch=full_branch))
 
         return changelist_to_filegroupinfo
 
-    def moveFilesToChangelist(self, file_list, changelist):
-        logging.debug("moveFilesToChangelist %s -> %s" %
-                      (file_list, changelist))
-        if len(file_list) == 0:
-            ErrorExit("Unable to find any file.")
-        valid_files = self._getValidGitFiles()
-
-        if set(file_list).issubset(valid_files):
-            self.changelist_info.addFilesToChangelist(file_list, changelist)
-            self.changelist_info.save()
-        else:
-            error_lines = []
-            for fname in set(file_list) - set(valid_files):
-                error_lines.append("Error in adding to changelist: '%s' needs "
-                                   "to be a staged or working file " % fname)
-            if len(error_lines) > 0:
-                ErrorExit("\n".join(error_lines))
-
     # branch specific functions:
 
-    def moveBranchToChangelist(self,
-                               remote_branch,
-                               local_branch,
-                               changelist,
-                               save=True):
-        self.changelist_info.moveBranchToChangelist(remote_branch,
-                                                    local_branch,
-                                                    changelist)
-        self.changelist_info.save()
-
-    def removeBranchFromChangelist(self, remote_branch, local_branch):
-        self.changelist_info.removeBranchFromChangelist(remote_branch,
-                                                        local_branch)
-        self.changelist_info.save()
-
-    def getBranchInfoFromRemoteBranchName(self, remote_branch):
-        """
-        Given a remote_branch name, return its full qualified list of
-        (remote_branch, current_branch) that matches 'git branch -a'
-        """
-        current_branch, branches, git_fileinfo = self._getCurrentGitInfo()
-        if current_branch == remote_branch:
-            ErrorExit("You cannot specify the current branch.")
-        if remote_branch == "origin":
-            # user may specify just "origin" -->
-            #   "remotes/origin/<current_branch>"
-            remote_branch = "remotes/origin/" + current_branch
-        elif remote_branch.startswith("origin/"):
-            # user may specify "origin/my_fix" --> "remotes/origin/my_fix"
-            remote_branch = "remotes/" + remote_branch
-        for branch in branches:
-            return remote_branch, current_branch
-        return None, None
-
-    def getChangelistFromBranch(self, remote_branch, local_branch):
-        return self.changelist_info.getChangelistFromBranch(remote_branch,
-                                                            local_branch)
-    # git-only functions:
-
-    def parseGitChangelistOptions(self, args):
-        """
-        Parse the different changelist options:
-        cr changelist my-fix-branch file1 file2 ...
-        cr changelist --remove file1 file2
-        cr changelist --remove --changelist issue12345_my-fix-branch
-        """
-        if args[0] in ['--remove', '--rm']:
-            cl_info = self.changelist_info
-            if args[1] in ['--changelist', '--cl']:
-                for cl in args[2:]:
-                    if cl_info.isAChangelist(cl):
-                        # The call removes both branch and working+staged
-                        # changelists
-                        cl_info.removeChangelist(cl)
-                    else:
-                        ErrorExit("Error: '%s' is not a changelist" % cl)
-            else:
-                if len(args[1:]) == 1:
-                    possible_branch = args[1]
-                    remote_branch, current_branch = (
-                        self.getBranchInfoFromRemoteBranchName(
-                            possible_branch))
-                    branch_to_changelistinfo = (
-                        cl_info.getAllBranchToChangelistInfo())
-                    if (remote_branch, current_branch) in (
-                            branch_to_changelistinfo):
-                        print("Removing branch %s from changelist" %
-                              getBranchPrintout(remote_branch, current_branch))
-                        self.removeBranchFromChangelist(remote_branch,
-                                                        current_branch)
-                        return
-                cl_info.removeFiles(args[1:])
-            cl_info.save()
-        else:
-            # add files or branch to changelist
-            changelist, files = args[0], args[1:]
-            if len(files) == 1:
-                possible_branch = args[1]
-                remote_branch, current_branch = (
-                    self.getBranchInfoFromRemoteBranchName(possible_branch))
-                if remote_branch and current_branch:
-                    self.moveBranchToChangelist(remote_branch, current_branch,
-                                                changelist)
-                    print("Branch %s is now a member of changelist '%s'." %
-                          (getBranchPrintout(remote_branch, current_branch),
-                           changelist))
-                    return
-
-            self.moveFilesToChangelist(files, changelist)
-            for fname in files:
-                print("Path '%s' is now a member of changelist '%s'." %
-                      (fname, changelist))
-
-    def parseGitBranchOptions(self, args):
-        """
-        Some remote branches that people check in are full of temporary files
-        that you may not care about. Therefore, this call allows users to
-        hide these branches in display:
-        cr br --hide origin/perf_tests
-        cr br --show origin/perf_tests
-        """
-        if '--verbose' in args:
-            args.remove('--verbose')
-
-        # Housekeeping: if a branch is in the changelist_info but does not
-        # actually exist, then remove it from changelist_info.
-        _, git_branches, _ = self._getCurrentGitInfo()
-        for hidden_branch in self.changelist_info.getAllHiddenBranches():
-            if hidden_branch not in git_branches:
-                self.changelist_info.showBranchInStatus(hidden_branch)
-                self.changelist_info.save()
-
-        if len(args) > 0 and args[0] in ['--hide', '--show']:
-            branches = args[1:]
-            for branch in branches:
-                remote_branch, local_branch = \
-                    self.getBranchInfoFromRemoteBranchName(branch)
-                if not remote_branch:
-                    ErrorExit("Unable to hide or show '%s' because it"
-                              " is not a remote branch." % branch)
-                if args[0] == '--hide':
-                    self.changelist_info.hideBranchFromStatus(remote_branch)
-                    print "Hiding branch '%s' from status." % remote_branch
-                else:
-                    self.changelist_info.showBranchInStatus(branch)
-                    print "Showing branch '%s' in status." % branch
-            self.changelist_info.save()
-        else:
-            self.executeAllCmd(['branch'] + args[0:])
+    def renameGitBranchWithIssueNum(self,
+                                    issue_str,
+                                    local_branch,
+                                    remote_branch):
+        new_branch_name = ('{issue_str}#'
+                           '{remote_branch}#{local_branch}'.format(
+                               issue_str=issue_str,
+                               local_branch=local_branch,
+                               remote_branch=remote_branch))
+        RunShellWithReturnCode([GIT, 'br', '-m', local_branch,
+                                new_branch_name])
 
     # private functions:
 
@@ -1075,10 +638,6 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
         git_dir += "/.git"
         return pwd, git_dir
 
-    def _getValidGitFiles(self):
-        _, _, git_fileinfo = self._getCurrentGitInfo()
-        return sorted(git_fileinfo.keys())
-
     def _getCurrentGitInfo(self):
         """
         Get current path, git path, branch name. This is done via
@@ -1088,7 +647,8 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
         branch name.
         """
         branches = []
-        current_branch = None
+        full_branch, issue, current_branch, remote_branch = (
+            None, None, None, 'remotes/origin/master')
         cmd = [GIT, "branch", "-a", "--no-color"]
         for branch in RunShell(cmd).splitlines():
             # Take care of "remotes/origin/HEAD -> origin/master"
@@ -1098,22 +658,14 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
                 ErrorExit("Unable to parse branch output: '%s'" % branch)
             branches.append(m.group(2))
             if m.group(1) == '*':
-                current_branch = m.group(2)
-        if not current_branch:
+                full_branch = current_branch = m.group(2)
+        if not full_branch:
             ErrorExit("Unable to determine current branch (git branch)")
 
-        git_fileinfo = {}
-        if current_branch != "(no branch)":
-            # this is the corner case where we have a detached head
-            for branch in branches:
-                cmd = [GIT, "diff", "--name-only", "--no-color",
-                       branch, current_branch]
-                for fname in RunShell(cmd, silent_ok=True).splitlines():
-                    if fname not in git_fileinfo:
-                        git_fileinfo[fname] = (
-                            FileInfo(fname, type=None, changelist=None))
-                    git_fileinfo[fname].setBranchInfo(branch, '*')
+        if len(full_branch.split('#')) >= 3:
+            issue, remote_branch, current_branch = full_branch.split('#', 2)
 
+        git_fileinfo = {}
         cmd = [GIT, "status", "--porcelain"]
         for line in RunShell(cmd, silent_ok=True).splitlines():
             m = re.match('^(.)(.) (.+)', line)
@@ -1130,9 +682,10 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
             if working != ' ':
                 git_fileinfo[fname].setBranchInfo(GitVCS.WORKING, working)
 
-        return current_branch, branches, git_fileinfo
+        return (full_branch, issue, current_branch, remote_branch,
+                branches, git_fileinfo)
 
-    def _getGitHttpUrlInfo(self, _hash=None, branch=""):
+    def _getGitHttpUrlInfo(self, githash=None, branch=""):
         """
         Return base URL and the hashed URL (for the current path).
         The base URL is used for display purpose, so that the reviewer
@@ -1149,13 +702,13 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
             return None, None
         repo = m.group(1)
 
-        if not _hash:
+        if not githash:
             cmd = [GIT, 'log', '-1', '--pretty=%H']
-            _hash, ret_code = RunShellWithReturnCode(cmd, print_output=False)
+            githash, ret_code = RunShellWithReturnCode(cmd, print_output=False)
             if ret_code != 0:
                 ErrorExit("Unable to execute '%s'" % cmd)
 
-        _vars = {'repo': repo, 'hash': _hash.strip()}
+        _vars = {'repo': repo, 'hash': githash.strip()}
         git_base_url = GIT_BASE_URL % _vars
 
         if branch and branch.startswith('remotes/origin'):
@@ -1168,15 +721,36 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
 
     def _getGitCommitLogList(self, rev_from=None, rev_to=None):
         """
-        Return all the commit messages, in the 'hash\tdesc' format.
+        Return commit messages in the [[hash,desc,body], ...] format.
         """
+        ID, DELIM = '__#id#__:', '__#delim#__'
+
+        def get_commit_comments(git_log, include_body=True):
+            comments = []
+            for line in git_log.splitlines():
+                idx = len(comments) - 1
+                if re.match('^' + ID, line):
+                    line = re.sub(r'^' + ID, '', line)
+                    hashtag, subject, body = line.split(DELIM)
+                    comments.append([hashtag, subject, ''])
+                    if include_body:
+
+                        if comments[idx][2] != '':
+                            comments[idx][2] += '\n'
+                        comments[idx][2] += body
+                elif len(comments) > 0 and include_body:
+                    comments[idx][2] += '\n' + line
+            return comments
+
+        logger.debug("FROM:%s TO:%s" % (rev_from, rev_to))
         if rev_from and rev_to:
             cmd = [GIT, "log", "%s..%s" % (rev_from, rev_to),
-                   "--pretty=%H\t%s"]
+                   "--pretty={ID}%H{DELIM}%s{DELIM}%b".format(
+                       ID=ID, DELIM=DELIM)]
             git_log, ret_code = RunShellWithReturnCode(cmd, print_output=False)
             if ret_code != 0:
-                ErrorExit("Unable to execute '%s' to get hash + desc..." % cmd)
-            return [line.split("\t", 1) for line in git_log.splitlines()]
+                ErrorExit("Unable to execute '%s' to get hash + subj..." % cmd)
+            return get_commit_comments(git_log)
 
         cmd = [GIT, "status"]
         git_status, ret_code = RunShellWithReturnCode(cmd, print_output=False)
@@ -1187,38 +761,34 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
                                  git_status)
         if commit_match:
             branch_ahead = int(commit_match.group(1))
-            cmd = [GIT, "log", "-%d" % branch_ahead, "--pretty=%H\t%s"]
+            cmd = [GIT, "log", "-%d" % branch_ahead,
+                   "--pretty={ID}%H{DELIM}%s{DELIM}%b".format(
+                       ID=ID, DELIM=DELIM)]
             git_log, ret_code = RunShellWithReturnCode(cmd, print_output=False)
             if ret_code != 0:
-                ErrorExit("Unable to execute '%s' to get hash + desc..." % cmd)
-            return [line.split("\t", 1) for line in git_log.splitlines()]
+                ErrorExit("Unable to execute '%s' to get hash + subj..." % cmd)
+            return get_commit_comments(git_log)
 
         return []
 
 
 def getBranchPrintout(remote_branch, local_branch):
-    return "'%s' (in the context of '%s')" % (remote_branch, local_branch)
+    return "'%s' (in the context of '%s')" % (local_branch, remote_branch)
 
 
-def ParseUserArguments(vcs, opt_revision, opt_changelist, opt_files):
+def ParseUserArguments(vcs, opt_svn_revision, opt_changelist, opt_files):
     """
     Given an optional changelist and optional files, return:
-    1) changelist
-    and
-    2) fileinfo_list
-    or
-    3) remote and local branch names
+    1) changelist and 2) fileinfo_list
     """
 
-    if opt_revision:
+    if opt_svn_revision:
         return (opt_changelist if opt_changelist else "issue",
-                [],  # fileinfo_list,
-                None,  # remote_branch,
-                None)  # local_branch
+                [])  # fileinfo_list,
 
     changelist_to_filegroupinfo = (
         vcs.getFileGroupInfo(changelist=opt_changelist))
-    logging.debug("changelist_to_filegroupinfo:%s" % (
+    logger.debug("changelist_to_filegroupinfo:%s" % (
         changelist_to_filegroupinfo))
 
     # The user will either want to commit files (defined by fileinfo_list),
@@ -1236,7 +806,7 @@ def ParseUserArguments(vcs, opt_revision, opt_changelist, opt_files):
         cl_len = len(changelist_to_filegroupinfo)
         if None in changelist_to_filegroupinfo:
             cl_len -= 1
-        logging.debug("changelist length:%d" % cl_len)
+        logger.debug("changelist length:%d" % cl_len)
         if cl_len == 1:
             # there is exactly one active changelist
             if None in changelist_to_filegroupinfo:
@@ -1262,45 +832,16 @@ def ParseUserArguments(vcs, opt_revision, opt_changelist, opt_files):
                        if cl])
     else:
         # the user specified one or more files
-        if len(opt_files) == 1:
-            # given "my_fix", return "remotes/origin/master#my_fix"
-            remote_branch, local_branch = (
-                vcs.getBranchInfoFromRemoteBranchName(opt_files[0]))
-            if remote_branch and local_branch:
-                # user specified a branch name instead of files
-                cl = vcs.getChangelistFromBranch(remote_branch, local_branch)
-                if not cl:
-                    cl = "issue"
-                filegroup_info = (
-                    FileGroupInfo(name=cl,
-                                  type=FileGroupInfo.TYPE_BRANCH,
-                                  remote_branch=remote_branch,
-                                  local_branch=local_branch))
-        if not cl:
-            # user has provided files
-            cl = "issue"
-            filegroup_info = (
-                FileGroupInfo(name=cl,
-                              type=FileGroupInfo.TYPE_FILES,
-                              fileinfo_list=[FileInfo(fn, type='*',
-                                                      changelist=cl)
-                                             for fn in opt_files]))
+        # user has provided files
+        cl = "issue"
+        filegroup_info = (
+            FileGroupInfo(name=cl,
+                          type=FileGroupInfo.TYPE_FILES,
+                          fileinfo_list=[FileInfo(fn, type='*',
+                                                  changelist=cl)
+                                         for fn in opt_files]))
 
-    return (cl,
-            filegroup_info.fileinfo_list,
-            filegroup_info.remote_branch,
-            filegroup_info.local_branch)
-
-
-def GetVCS(options):
-    """ Factory: return a VCS object (GitVCS, SubversionVCS, etc...) """
-    (vcs, extra_output) = upload.GuessVCSName(options)
-    if vcs == upload.VCS_MERCURIAL:
-        raise NotImplementedError("Mercurial for cr is not yet implemented")
-    elif vcs == upload.VCS_SUBVERSION:
-        return SubversionVCS(options)
-    elif vcs == upload.VCS_GIT:
-        return GitVCS(options)
+    return (cl, filegroup_info.fileinfo_list)
 
 
 def fetchContentFromUrl(rpc_server, url):
@@ -1374,6 +915,7 @@ def getRawHTMLMessagesFromMondrian(html, api_data):
             msg_text = msg_text_body.getText(separator=" ")
         else:
             msg_text = ""
+        msg_text = msg_text.encode('utf-8')
         raw_msgs.append({'commenter': str(commenter.strip()),
                          'ago': str(ago.strip()),
                          'msg': str(msg_text.strip())})
@@ -1435,26 +977,6 @@ def printChangelistHelp(prog, vcs_cmd):
               "--changelist %(cl)s""" % help_params)
 
 
-def printGitFinishHelp(current_branch, remote_branch):
-    remote_name = remote_branch.split("/")[-1]
-
-    help_args = {'prog': GIT,
-                 'current_branch': current_branch,
-                 'remote_branch': remote_branch,
-                 'remote_name': remote_name}
-
-    if current_branch == "master":
-        print """Suggested command(s) to execute manually (you are on master):
-%(prog)s fetch; %(prog)s rebase -i %(remote_branch)s
-%(prog)s push origin %(remote_name)s""" % help_args
-    else:
-        # Go to master, pull from working branch, then push to origin/master.
-        print """Suggested command(s) to execute manually:
-%(prog)s fetch; %(prog)s checkout %(remote_name)s; %(prog)s rebase -i %(remote_branch)s
-%(prog)s merge --no-ff --log %(current_branch)s; %(prog)s push origin %(remote_name)s
-%(prog)s branch -d %(current_branch)s""" % help_args
-
-
 def executeUploadPy(vcs,
                     options,
                     files,
@@ -1467,7 +989,7 @@ def executeUploadPy(vcs,
     if base_url:
         upload_argv.extend(["--base_url", base_url])
 
-    logging.debug("executeUploadPy files:%s" % files)
+    logger.debug("executeUploadPy files:%s" % files)
     diff_data = vcs.GenerateDiff(files, options=options)
     err_msg, warn_msg = vcs.GetTriggerWarnings(diff_data)
     if err_msg:
@@ -1497,7 +1019,9 @@ def executeUploadPy(vcs,
         goofy_subject = CrBaseVCS.GetGoofySubjectHeader(diff_data) + " "
     else:
         goofy_subject = ""
-    upload_argv.extend(["-m", (goofy_subject + message)[0:100]])
+
+    upload_subject = (goofy_subject + message).replace('\n', ' ')[0:100]
+    upload_argv.extend(["-m", upload_subject])
 
     # setup arguments for upload.py
     if options.verbose:
@@ -1530,7 +1054,7 @@ def executeUploadPy(vcs,
         upload_argv.append("--cc=" + ",".join(cc))
 
     upload_argv = [str(a) for a in upload_argv]
-    logging.debug("Executing: %s" % str(upload_argv))
+    logger.debug("Executing: %s" % str(upload_argv))
     return upload.RealMain(upload_argv, diff_data)
 
 
@@ -1556,62 +1080,67 @@ def executeIssueNumberAndUpload(vcs, prog, argv,
 
     options.send_mail = send_mail    # pass on --send_mail option to upload.py
 
-    # either return fileinfo_list, or (remote_branch & local_branch)
-    cl, fileinfo_list, remote_branch, local_branch = (
-        ParseUserArguments(
-            vcs, options.revision, options.changelist, user_files))
-
     # If using Git but no message provided, then check for already
     # committed messages (thus passing --message is not necessary).
-    if vcs.CMD == GIT and not options.message:
-        if options.revision and ':' in options.revision:
-            rev_from, rev_to = options.revision.split(':', 1)
-            rev_from += '^'
-        else:
-            if remote_branch:
-                rev_from, rev_to = remote_branch, "HEAD"
-            else:
-                rev_from, rev_to = None, None
+    remote_branch = current_branch = cl = None
+    fileinfo_list = []
+    if vcs.CMD == SVN:
+        cl, fileinfo_list = ParseUserArguments(
+                vcs, options.revision, options.changelist, user_files)
+
+    elif vcs.CMD == GIT:
+        RunShellWithLineCommand('git fetch')
+        cl, issue, current_branch, remote_branch, _branches, _git_fileinfo = (
+            vcs._getCurrentGitInfo())
+        RunShellWithLineCommand('git rebase %s' % remote_branch)
+
+        rev_from, rev_to = remote_branch, cl
         gitCommitLogList = vcs._getGitCommitLogList(rev_from=rev_from,
                                                     rev_to=rev_to)
-        if len(gitCommitLogList) > 0:
-            options.message = " ".join(
-                [desc for _hash, desc in gitCommitLogList])
+        commit_length = len(gitCommitLogList)
+        if commit_length == 0:
+            ErrorExit("Please commit your code (in branch '%s') first." % cl)
+
+        message = options.message
+        if not message:
+            message = ''
+        else:
+            message = re.sub(r'[\.\s]+$', '', message) + '.'
+            message += '\n'
+        for i, commit_log in enumerate(reversed(gitCommitLogList)):
+            _githash, desc, body = commit_log
+            message += ('%d) ' % (i + 1)) if commit_length > 1 else ''
+            message += desc
+            message += ('\n' + body) if body else ''
+            message = re.sub(r'[\.\s]+$', '', message) + '.'
+            if i + 1 != commit_length:
+                message += '\n'
+        options.message = message
 
     if not options.message:
         CrOptionParser.parser.error("Please specify --message [short: -m]")
 
-    logging.debug("executeIssueNumberAndUpload options:%s, user_files:%s" %
-                  (options, user_files))
+    logger.debug("executeIssueNumberAndUpload options:%s, user_files:%s" %
+                 (options, user_files))
 
     if options.revision:
         file_list = []
-        if options.changelist:
-            existing_cl = options.changelist
-        else:
-            existing_cl = cl
-            # TODO(kevinx): add in logic to automatically get the
-            #               base URL from hash
         base_url = "hash:unknown"
-    elif remote_branch or local_branch:
-        file_list = [remote_branch, local_branch]
-        existing_cl = vcs.getChangelistFromBranch(remote_branch, local_branch)
-        if existing_cl != cl:
-            print("Moving branch %s to changelist '%s'" %
-                  (getBranchPrintout(remote_branch, local_branch), cl))
-            vcs.moveBranchToChangelist(remote_branch, local_branch, cl)
+    elif remote_branch or current_branch:
+        # this is only for git
+        file_list = [remote_branch, current_branch]
         base_url = vcs.getBaseUrl(branch=remote_branch)
     elif fileinfo_list:
+        # svn (not for git)
         file_list = [f.name for f in fileinfo_list if f.type != '?']
-        logging.debug("cl:%s, file_list:%s" % (cl, file_list))
+        logger.debug("cl:%s, file_list:%s" % (cl, file_list))
         if len(file_list) > 0:
             print "Moving %s to changelist '%s'" % (file_list, cl)
             vcs.moveFilesToChangelist(file_list, cl)
         base_url = None
     else:
         # FIXME(kevinx): unknown problem, fix
-        ErrorExit("Fatal error, filegroup_info '%s' is an invalid object" %
-                  filegroup_info)
+        ErrorExit("Fatal error, nothing changed.")
 
     m = re.match(r'issue(\d+)', cl)
     if m:
@@ -1625,16 +1154,24 @@ def executeIssueNumberAndUpload(vcs, prog, argv,
                                               first_upload=False)
         assert(int(issue_str) == issue_num)
         if not quiet:
-            print(
-                """patch '%(patch)s' successfully!
-                After someone else provides LGTM at the URL below:
-                http://%(server)s/%(issue_num)d  then you can submit via:
-                %% %(prog)s finish [--changelist %(cl)s] [-m \"Comments\"]""" %
-                {'patch': patchset,
-                 'server': SERVER,
-                 'issue_num': issue_num,
-                 'prog': prog,
-                 'cl': cl})
+            finish_options = (
+                '[--changelist {cl}] [-m \"Comments\"]'.format(cl=cl)
+                if vcs.CMD != GIT else '')
+            print("""Patched '{patch}' to {issue_num}.
+After your reviewer provides a final LGTM at the URL
+(http://{server}/{issue_num}) then you can finish submitting your code:
+% {prog} finish {finish_options}
+
+If you need to re-update more patches to {issue_num}, execute:
+% {prog} mail {reviewer_options}[-m \"my patch message\"]""".format(
+                prog=prog,
+                patch=patchset,
+                server=SERVER,
+                issue_num=issue_num,
+                reviewer_options=(
+                    '-r %s ' % options.reviewers if options.reviewers
+                    else '[-r reviewer1,reviewer2,...] '),
+                finish_options=finish_options))
         return None, None
 
     if not options.reviewers:
@@ -1646,27 +1183,40 @@ def executeIssueNumberAndUpload(vcs, prog, argv,
                                           files=file_list,
                                           base_url=base_url,
                                           first_upload=True)
-    if cl == 'issue':
-        new_cl = "issue" + issue_str
-    else:
-        new_cl = "issue%s-%s" % (issue_str, cl)
 
-    if remote_branch and local_branch:
-        if existing_cl != new_cl:
-            print("Moving branch %s to changelist '%s'" %
-                  (getBranchPrintout(remote_branch, local_branch), new_cl))
-            vcs.moveBranchToChangelist(remote_branch, local_branch, new_cl)
+    new_cl = "issue" + issue_str
+    if remote_branch and current_branch:
+        # for git, rename the branch name with issue number
+        if not re.match(r'^issue\d+#[\w\-]+#[\w\-]+#', cl):
+            print("Moving git branch %s to issue%s" %
+                  (getBranchPrintout(remote_branch, current_branch),
+                   issue_str))
+            vcs.renameGitBranchWithIssueNum('issue' + issue_str,
+                                            current_branch, remote_branch)
     elif file_list:
+        # subversion
+        if cl != 'issue':
+            new_cl = "issue%s-%s" % (issue_str, cl)
         print "Moving %s to new changelist '%s'" % (file_list, new_cl)
         vcs.moveFilesToChangelist(file_list, new_cl)
 
-    if not options.force:
+    if options.force:
+        print('Skipping code review process [--force]')
+    else:
         print ""
         if not send_mail:
             print("Note: %s did not automatically send email to '%s'." %
                   (prog, options.reviewers))
-        print "After %s provides an LGTM, submit via:" % options.reviewers
-        print "%% %s finish --changelist %s [-m \"Comments\"]" % (prog, new_cl)
+
+        finish_options = (('--changelist %s [-m "Comments"]' % new_cl)
+                          if vcs.CMD != GIT else '')
+        print("""To re-submit your updates, execute:
+% {prog} mail -r {reviewers} [-m \"my patch message\"]"
+
+When %s reviews your code and provides an LGTM, submit via:
+% {prog} finish {finish_options}""".format(prog=prog,
+                                           reviewers=options.reviewers,
+                                           finish_options=finish_options))
 
     return issue_str, patchset
 
@@ -1686,7 +1236,7 @@ def executeCheckIn(vcs, prog, argv):
     elif len(user_files) > 0:
         pass
 
-    logging.debug("Files/branch to commit: %s" % user_files)
+    logger.debug("Files/branch to commit: %s" % user_files)
 
     if options.revision:
         changelist_to_filegroupinfo = {}
@@ -1696,7 +1246,7 @@ def executeCheckIn(vcs, prog, argv):
             vcs.getFileGroupInfo(changelist=options.changelist,
                                  opt_files=user_files))
 
-    cl, fileinfo_list, remote_branch, local_branch = (
+    cl, fileinfo_list = (
         ParseUserArguments(
             vcs, options.revision, options.changelist, user_files))
 
@@ -1725,7 +1275,12 @@ def executeCheckIn(vcs, prog, argv):
             # convenience of the --force.
             issue_str, patchset = executeIssueNumberAndUpload(vcs, prog, argv)
             issue_num = int(issue_str)
-            cl = "issue" + issue_str
+            if vcs.CMD == SVN:
+                cl = "issue" + issue_str
+            elif vcs.CMD == GIT:
+                (cl, issue,
+                 _current_branch, _remote_branch, _branches,
+                 _gitfileinfo) = vcs._getCurrentGitInfo()
         else:
             ErrorExit("The changelist '%s' is not approved for check in.\n" %
                       cl +
@@ -1738,7 +1293,7 @@ def executeCheckIn(vcs, prog, argv):
                                      save_cookies=True,
                                      account_type=upload.AUTH_ACCOUNT_TYPE)
 
-    # Step one: fetch the status of the issue on Mondrian
+    # Step 1: fetch the status of the issue on Mondrian
     if not options.force:
         print("Checking for LGTM status from %s for changelist '%s'... " %
               (SERVER, cl))
@@ -1755,7 +1310,7 @@ def executeCheckIn(vcs, prog, argv):
         else:
             mondrian_description = mondrian_page_info['title']
 
-    logging.debug("Original mondrian info:" + str(mondrian_page_info))
+    logger.debug("Original mondrian info:" + str(mondrian_page_info))
 
     approval_message = ""
     if options.force:
@@ -1768,10 +1323,10 @@ def executeCheckIn(vcs, prog, argv):
         mondrian_msgs = mondrian_page_info['messages']
         for msg_pack in mondrian_msgs:
             msg = msg_pack['msg']
-            logging.debug("...msg:'%s'" % msg)
+            logger.debug("...msg:'%s'" % msg)
             if re.search(r"LGTM|LTGM|looks good to me", msg, re.IGNORECASE):
                 _approver = msg_pack['commenter']
-                if _approver == "me":
+                if _approver == "me" and os.environ.get('LGTM', None) is None:
                     print("You should not LGTM or solicit LGTM in "
                           "your own comment!")
                 else:
@@ -1807,18 +1362,11 @@ def executeCheckIn(vcs, prog, argv):
                          issue_num))
     print("Committing changelist '%s' approved by %s (%s)..." %
           (cl, ",".join(approvers), lgtm_ago))
-    if options.revision:
-        # TODO(kevinx): this is a quick hack that needs to be fixed. The reason
-        #               this is done is to make sure we skip checking if
-        #               a changelist exists or not.
-        vcs_message = "Checked in revision: %s" % options.revision
-        printGitFinishHelp("<current_branch>", "origin/master")
-    else:
-        # normal changelist that exists
-        vcs_message = vcs.commitAndGetMessage(cl,
-                                              approval_message,
-                                              mondrian_description,
-                                              force=options.force)
+    # normal changelist that exists
+    vcs_message = vcs.commitAndGetMessage(cl,
+                                          approval_message,
+                                          mondrian_description,
+                                          force=options.force)
 
     # Step 4: auto close the issue on Mondrian if it's been LGTM'ed
     if options.force:
@@ -1851,7 +1399,7 @@ def executeCheckIn(vcs, prog, argv):
     tries = 3
     while tries > 0:
         try:
-            logging.debug("Uploading to %s ..." % url)
+            logger.debug("Uploading to %s ..." % url)
             update_html = rpc_server.Send(url,
                                           content_type=UPLOAD_CONTENT_TYPE,
                                           payload=pload,
@@ -1868,7 +1416,7 @@ def executeCheckIn(vcs, prog, argv):
                 return
         print("Error posting a commit message to "
               "http://%s%s, trying again..." % (SERVER, url))
-        time.sleep(1)
+        time.sleep(2)
         tries -= 1
 
     ErrorExit("Unable to publish '%s' to http://%s%s:\n%s" %
@@ -1886,7 +1434,7 @@ def getVcsArgsAndRemnantArgs(argv):
     for arg in argv:
         m = re.search("(\-+\d+)=(.+)", arg)
         if m:
-            _argv.extend(m.group(1), m.group(2))
+            _argv.extend(m.group(1, 2))
         else:
             _argv.append(arg)
 
@@ -1913,7 +1461,7 @@ def getVcsArgsAndRemnantArgs(argv):
 
 def Main(argv):
     if '--verbose' in argv:
-        logging.getLogger().setLevel(logging.DEBUG)
+        logger.getLogger().setLevel(logger.DEBUG)
         argv.remove('--verbose')
         argv.append('--verbose')
 
@@ -1922,8 +1470,18 @@ def Main(argv):
     else:
         prog = os.path.basename(argv[0])
 
-    vcs_args, remnant_args = getVcsArgsAndRemnantArgs(argv[1:])
-    vcs_options, args = upload.parser.parse_args(vcs_args)
+    #vcs_args, remnant_args = getVcsArgsAndRemnantArgs(argv[1:])
+    #vcs_options, args = upload.parser.parse_args(vcs_args)
+    vcs_options, args = upload.parser.parse_args([])
+
+    def GetVCS(options):
+        """ Factory: return a VCS object (GitVCS, SubversionVCS, etc...) """
+        (vcs, extra_output) = upload.GuessVCSName(options)
+        if vcs == upload.VCS_SUBVERSION:
+            return SubversionVCS(options)
+        elif vcs == upload.VCS_GIT:
+            return GitVCS(options)
+        raise NotImplementedError("Unimplemented VCS %s" % vcs)
     vcs = GetVCS(vcs_options)
 
     if len(argv) == 1:
@@ -1969,11 +1527,7 @@ def Main(argv):
     elif vcs.CMD == GIT and cmd in ['br', 'branch']:
         vcs.parseGitBranchOptions(argv[2:])
     elif vcs.CMD == GIT and cmd in ['cl', 'changelist']:
-        args = argv[2:] if len(argv[2:]) >= 1 else []
-        if len(args) < 2:
-            printChangelistHelp(prog, vcs.CMD)
-            sys.exit(1)
-        vcs.parseGitChangelistOptions(args)
+        ErrorExit("Sorry, git does not have a changelist option like svn.")
     elif vcs.CMD == GIT and cmd == 'co':
         vcs.executeAllCmd(['checkout'] + argv[2:])
     else:

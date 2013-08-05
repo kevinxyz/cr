@@ -4,7 +4,11 @@ All the work here is experimental. I assume no responsibility for
 any harm that the programs may result in. Use at your own risk!
 
 Note that cr requires a third party package called Beautiful Soup,
-a HTML/XML parser. Version must be 3.2.0 or greater. Download from 
+a HTML/XML parser. Version must be 3.2.0 or greater. You can
+get it on Linux via:
+% sudo apt-get install python-beautifulsoup
+
+Or download and install manually from
 http://www.crummy.com/software/BeautifulSoup/. This package is 
 needed because in 2011, there is no plain API call to Mondrian
 to fetch comments (in order to grep for LGTM).
@@ -16,12 +20,14 @@ First make sure to add Google Code Review to your Google App domain
 http://www.google.com/enterprise/marketplace/viewListing?productListingId=5143210+12982233047309328439
 and then click on Add it now).
 
-Afterwards, in bin/cr change your CR_SERVER to your server.
-Now you can start using cr!
+Afterwards, in bin/cr change your CR_SERVER to your server. Change your
+CR_DEFAULT_CC to people in your development group.
+Make sure it is in your PATH. Now you can start using cr!
 
-Things to try:
-==============
-cd <your own git directory>
+
+If you use svn or git:
+======================
+cd <your own svn directory>
 cr st   # status
 # edit a few files
 cr commit -m "This is my first code review." -a
@@ -31,4 +37,4 @@ cr finish
 
 
 -Kevin X
-2013-07-26
+2013-08-05

@@ -2,8 +2,8 @@
 
 export CR=$0
 export CR_SUBJECT_HEADER="[Code review] "
-#export CR_DEFAULT_CC="developers@__MY_DOMAIN__"
-export CR_DEFAULT_CC="kevinx@open42.com"
+export CR_SERVER="code.open42.com"
+export CR_DEFAULT_CC="developers@__MY_DOMAIN__"
 export CR_MAX_PERL_COLS=89
 export CR_MAX_PYTHON_COLS=79
 export CR_MAX_JAVA_COLS=79
