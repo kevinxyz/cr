@@ -541,13 +541,6 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
                     'remote_branch': remote_branch,
                     'remote_name': remote_name}
 
-        if current_branch == 'master':
-            print("You are on master. "
-                  "It's safer/cleaner if you branch next time.")
-        else:
-            pass
-            #"%(prog)s merge --no-ff --log %(current_branch)s"])
-
         RunShellWithLineCommand(
             ["%(prog)s fetch" % cmd_args,
              "%(prog)s rebase %(remote_branch)s" % cmd_args])
@@ -561,13 +554,16 @@ class GitVCS(CrBaseVCS, upload.GitVCS):
 
         # pull from remotes/origin/master, and then merge (may change hash IDs)
         if current_branch == 'master':
-            RunShellWithLineCommand(
-                ['%(prog)s push origin %(remote_name)s' % cmd_args])
-        else:
-            RunShellWithLineCommand(
-                ['%(prog)s push origin'
-                 ' %(current_branch)s:%(remote_name)s' % cmd_args])
-            print """Suggested commands to sync and clean up branch manually:
+            print("You are on local master. Next time consider using "
+                  "a non-master branch (git checkout -b <new_branch_name>)")
+            #RunShellWithLineCommand(
+            #    ['%(prog)s push origin %(remote_name)s' % cmd_args])
+
+        #"%(prog)s merge --no-ff --log %(current_branch)s"])
+        RunShellWithLineCommand(
+            ['%(prog)s push origin'
+             ' %(current_branch)s:%(remote_name)s' % cmd_args])
+        print """Suggested commands to sync and clean up branch manually:
 %(prog)s checkout master; %(prog)s rebase origin/master;
 %(prog)s branch -d %(current_branch)s""" % cmd_args
 
